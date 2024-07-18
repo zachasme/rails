@@ -1,3 +1,12 @@
+*   Add support for SQLite3 full-text-search and other virtual tables.
+
+    Previosuly, adding sqlite3 virtual tables messed up `schema.rb`.
+
+    Now, virtual tables can safely be added using `create_virtual_table`.
+
+    *Zacharias Knudsen*
+
+
 *   Fix duplicate callback execution when child autosaves parent with `has_one` and `belongs_to`.
 
     Before, persisting a new child record with a new associated parent record would run `before_validation`,
