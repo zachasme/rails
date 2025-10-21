@@ -19,6 +19,7 @@ module Rails
           bin
           public_directory
           active_storage
+          solid
           display_upgrade_guide_info
         end
 
@@ -45,6 +46,12 @@ module Rails
         def active_storage
           require_application!
           app_generator.update_active_storage
+        end
+
+        desc "solid", "Re-run the install command for solid_cache, solid_queue and solid_cable", hide: true
+        def solid
+          require_application!
+          app_generator.run_solid
         end
 
         private
@@ -75,6 +82,7 @@ module Rails
               skip_brakeman:       skip_gem?("brakeman"),
               skip_bundler_audit:  skip_gem?("bundler-audit"),
               skip_rubocop:        skip_gem?("rubocop"),
+              skip_solid:          skip_all_gems?("solid_cache", "solid_queue", "solid_cable"),
               skip_thruster:       skip_gem?("thruster"),
               skip_test:           !defined?(Rails::TestUnitRailtie),
               skip_system_test:    Rails.application.config.generators.system_tests.nil?,
@@ -92,6 +100,12 @@ module Rails
             false
           rescue LoadError
             true
+          end
+
+          def skip_all_gems?(*gem_names)
+            gem_names.all? do |gem_name|
+              skip_gem?(gem_name)
+            end
           end
       end
     end

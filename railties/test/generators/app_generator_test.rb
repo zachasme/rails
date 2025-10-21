@@ -318,6 +318,15 @@ class AppGeneratorTest < Rails::Generators::TestCase
     end
   end
 
+  def test_app_update_preserves_skip_solid
+    run_generator [ destination_root, "--skip-solid" ]
+
+    FileUtils.cd(destination_root) do
+      output = run_app_update
+      assert_no_match("solid", output)
+    end
+  end
+
   def test_app_update_preserves_skip_thruster
     run_generator [ destination_root, "--skip-thruster" ]
 
