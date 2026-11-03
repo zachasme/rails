@@ -599,17 +599,19 @@ module ActiveRecord
       # Load the model's schema information either from the schema cache
       # or directly from the database.
       def load_schema
-        return if schema_loaded?
+        return if schema_and_hooks_loaded? || building_schema_context?
 
         @load_schema_monitor.synchronize do
-          unless schema_loaded? || @schema_context
-            @schema_context = build_schema_context
+          unless schema_loaded?
+            @schema_context ||= build_schema_context
             @schema_context.load_schema!
-            ActiveSupport::Ractors.make_shareable(@schema_context)
-            unless @schema_hooks_loaded
-              load_schema!
-              @schema_hooks_loaded = true
-            end
+          end
+
+          ActiveSupport::Ractors.make_shareable(@schema_context)
+
+          unless @schema_hooks_loaded
+            load_schema!
+            @schema_hooks_loaded = true
           end
         rescue
           reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
@@ -657,6 +659,14 @@ module ActiveRecord
         end
 
       private
+        def schema_and_hooks_loaded?
+          schema_loaded? && @schema_hooks_loaded
+        end
+
+        def building_schema_context?
+          @schema_context && @load_schema_monitor.mon_owned?
+        end
+
         def inherited(child_class)
           super
           child_class.initialize_load_schema_monitor
