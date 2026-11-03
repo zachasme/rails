@@ -599,11 +599,11 @@ module ActiveRecord
       # Load the model's schema information either from the schema cache
       # or directly from the database.
       def load_schema
-        return if schema_loaded?
+        return if schema_loaded? || building_schema_context?
 
         @load_schema_monitor.synchronize do
-          unless schema_loaded? || @schema_context
-            @schema_context = build_schema_context
+          unless schema_loaded?
+            @schema_context ||= build_schema_context
             @schema_context.load_schema!
             ActiveSupport::Ractors.make_shareable(@schema_context)
             unless @schema_hooks_loaded
@@ -657,6 +657,10 @@ module ActiveRecord
         end
 
       private
+        def building_schema_context?
+          @schema_context && @load_schema_monitor.mon_owned?
+        end
+
         def inherited(child_class)
           super
           child_class.initialize_load_schema_monitor
