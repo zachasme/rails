@@ -1,11 +1,31 @@
 # frozen_string_literal: true
 
 require "monitor"
+require "active_support/concurrency/share_lock"
+require "active_support/fork_tracker"
 require "active_record/model_schema/schema_context"
 
 module ActiveRecord
   module ModelSchema
     extend ActiveSupport::Concern
+
+    # A fork waits for schema loads in other threads, so a child process never starts with a half-loaded schema.
+    @schema_loads = ActiveSupport::Concurrency::ShareLock.new
+
+    class << self
+      attr_reader :schema_loads # :nodoc:
+    end
+
+    ActiveSupport::ForkTracker.after_fork do
+      @schema_loads = ActiveSupport::Concurrency::ShareLock.new
+    end
+
+    module WaitForSchemaLoadsBeforeFork # :nodoc:
+      def _fork
+        ModelSchema.schema_loads.exclusive { super }
+      end
+    end
+    ::Process.singleton_class.prepend(WaitForSchemaLoadsBeforeFork)
 
     ##
     # :method: id_value
@@ -601,19 +621,25 @@ module ActiveRecord
       def load_schema
         return if schema_loaded?
 
-        @load_schema_monitor.synchronize do
-          unless schema_loaded? || @schema_context
-            @schema_context = build_schema_context
-            @schema_context.load_schema!
-            ActiveSupport::Ractors.make_shareable(@schema_context)
-            unless @schema_hooks_loaded
-              load_schema!
-              @schema_hooks_loaded = true
+        ModelSchema.schema_loads.sharing do
+          @load_schema_monitor.synchronize do
+            finished = false
+            unless schema_loaded? || @schema_context
+              @schema_context = build_schema_context
+              @schema_context.load_schema!
+              ActiveSupport::Ractors.make_shareable(@schema_context)
+              unless @schema_hooks_loaded
+                load_schema!
+                @schema_hooks_loaded = true
+              end
             end
+            finished = true
+          rescue
+            reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
+            raise
+          ensure
+            @schema_context = nil unless finished # Thread#kill and Timeout.timeout skip the rescue.
           end
-        rescue
-          reload_schema_from_cache # If the schema loading failed half way through, we must reset the state.
-          raise
         end
       end
 
