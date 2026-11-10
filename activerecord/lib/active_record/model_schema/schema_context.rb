@@ -158,7 +158,11 @@ module ActiveRecord
           ActiveSupport::Ractors[@attributes_key] = [self, attributes].freeze
         end
         model_class.include(AttributeMethods::CompositePrimaryKey) if mapped_table.primary_key_definition.composite?
-        @mapped_table_cell.value = ActiveSupport::Ractors.make_shareable(mapped_table.freeze)
+        ActiveSupport::Ractors.make_shareable(mapped_table.freeze)
+      end
+
+      def publish_mapped_table(mapped_table) # :nodoc:
+        @mapped_table_cell.value = mapped_table
       end
 
       def mapped_table # :nodoc:
