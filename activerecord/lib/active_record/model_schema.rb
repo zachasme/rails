@@ -229,10 +229,11 @@ module ActiveRecord
       end
 
       def mapped_table # :nodoc:
-        loaded_mapped_table || schema_context.mapped_table
+        loaded_mapped_table || finish_loading_schema(schema_context)
       end
 
       def schema_attributes # :nodoc:
+        mapped_table unless loaded_mapped_table
         if table = loaded_mapped_table
           table.attributes || schema_context.ractor_attributes
         else
@@ -608,8 +609,8 @@ module ActiveRecord
       # Load the model's schema information either from the schema cache
       # or directly from the database.
       def load_schema
-        return if schema_loaded?
-        schema_context.mapped_table
+        return if loaded_mapped_table
+        mapped_table
         true
       end
 
@@ -622,17 +623,13 @@ module ActiveRecord
           @load_schema_monitor.synchronize do
             if table = context.loaded_mapped_table
               table
-            elsif @schema_loading_tables.key?(context)
-              @schema_loading_tables[context]
+            elsif loading_schema_here?(context)
+              @schema_loading_tables[context].last
             else
               begin
-                @schema_loading_tables[context] = nil
-                table = context.load_schema! { |loading| @schema_loading_tables[context] = loading }
-                if context.equal?(current_schema_context) && !@schema_hooks_loaded
-                  load_schema!
-                  @schema_hooks_loaded = true
-                end
-                @loaded_mapped_table = table if context.equal?(current_schema_context)
+                @schema_loading_tables[context] = [Fiber.current, nil]
+                table = context.load_schema! { |loading| @schema_loading_tables[context] = [Fiber.current, loading] }
+                run_schema_hooks(context, table)
                 table
               rescue
                 reload_schema_from_cache if context.equal?(current_schema_context)
@@ -684,6 +681,34 @@ module ActiveRecord
 
         def schema_loaded?
           @schema_context&.schema_loaded? || false
+        end
+
+        # A fork can copy another thread's unfinished load, so only this fiber's own load counts as in progress.
+        def loading_schema_here?(context)
+          @schema_loading_tables[context]&.first.equal?(Fiber.current)
+        end
+
+        # Runs the hooks a published table still needs, when a fork or Thread#kill stopped the load
+        # that published it. Hooks running in another thread aren't waited for.
+        def finish_loading_schema(context)
+          table = context.mapped_table
+          if ActiveSupport::Ractors.main? && context.equal?(current_schema_context) && !@load_schema_monitor.mon_locked?
+            @load_schema_monitor.synchronize do
+              run_schema_hooks(context, table) unless @loaded_mapped_table
+            rescue
+              reload_schema_from_cache if context.equal?(current_schema_context)
+              raise
+            end
+          end
+          table
+        end
+
+        def run_schema_hooks(context, table)
+          if context.equal?(current_schema_context) && !@schema_hooks_loaded
+            load_schema!
+            @schema_hooks_loaded = true
+          end
+          @loaded_mapped_table = table if context.equal?(current_schema_context)
         end
 
       private
