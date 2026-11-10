@@ -622,12 +622,13 @@ module ActiveRecord
           @load_schema_monitor.synchronize do
             if table = context.loaded_mapped_table
               table
-            elsif @schema_loading_tables.key?(context)
-              @schema_loading_tables[context]
+            elsif (entry = @schema_loading_tables[context]) && entry.first.equal?(Thread.current)
+              entry.last
             else
               begin
-                @schema_loading_tables[context] = nil
-                table = context.load_schema! { |loading| @schema_loading_tables[context] = loading }
+                # A fork copies loads other threads had in progress, but those threads don't exist in the child.
+                @schema_loading_tables[context] = [Thread.current, nil]
+                table = context.load_schema! { |loading| @schema_loading_tables[context] = [Thread.current, loading] }
                 if context.equal?(current_schema_context) && !@schema_hooks_loaded
                   load_schema!
                   @schema_hooks_loaded = true
