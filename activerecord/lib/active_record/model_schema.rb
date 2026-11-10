@@ -622,12 +622,12 @@ module ActiveRecord
           @load_schema_monitor.synchronize do
             if table = context.loaded_mapped_table
               table
-            elsif @schema_loading_tables.key?(context)
-              @schema_loading_tables[context]
+            elsif loading_schema_here?(context)
+              @schema_loading_tables[context].last
             else
               begin
-                @schema_loading_tables[context] = nil
-                table = context.load_schema! { |loading| @schema_loading_tables[context] = loading }
+                @schema_loading_tables[context] = [Fiber.current, nil]
+                table = context.load_schema! { |loading| @schema_loading_tables[context] = [Fiber.current, loading] }
                 if context.equal?(current_schema_context) && !@schema_hooks_loaded
                   load_schema!
                   @schema_hooks_loaded = true
@@ -684,6 +684,11 @@ module ActiveRecord
 
         def schema_loaded?
           @schema_context&.schema_loaded? || false
+        end
+
+        # A fork can copy another thread's unfinished load, so only this fiber's own load counts as in progress.
+        def loading_schema_here?(context)
+          @schema_loading_tables[context]&.first.equal?(Fiber.current)
         end
 
       private
